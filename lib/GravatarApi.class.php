@@ -1,175 +1,221 @@
 <?php
+
+/*
+ * This file is part of the sfGravatar2Plugin.
+ * (c) 2010 Konstantin Kudryashov <ever.zet@gmail.com>
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
 /**
- * This API Enable auto caching gravatar image
- * It is inspired by these two scripts :
- * - http://fucoder.com/code/gravatar-cache/
- * - http://svn.hiddenloop.com/public/plugins/mephisto_gravatar_cache/
+ * gravatar implements gravatar API.
  *
- * TODO :
- *  - automatically remove cached gravatar through a cron OR with phptask
- *  - add unit tests
- *
- * @package  Symfony Plugin
- * @author   Mickael Kurmann
- * @author   Xavier Lacot <xavier@lacot.org>
- * @see      http://www.symfony-project.com/trac/wiki/sfPropelActAsCommentableBehaviorPlugin
- * @license  MIT
- **/
-class GravatarApi
+ * @package    sfGravatar2Plugin
+ * @subpackage libs
+ * @author     Konstantin Kudryashov <ever.zet@gmail.com>
+ * @version    1.0.0
+ */
+class gravatarApi
 {
-  // default cached gravatar img
-  protected $default_image;
+  protected $url_base = 'http://www.gravatar.com/avatar/';
+  protected $url_secure_base = 'https://secure.gravatar.com/avatar/';
+  protected $available_ratings = array('g', 'pg', 'r', 'x');
+  protected $available_defaults = array('identicon', 'monsterid', 'wavatar', '404');
+  protected $is_secure;
 
-  // possible to put : 3 days, 1 week, and whatever you want according to php strtotime function
-  protected $expire_ago;
+  protected $hash;
+  protected $type;
+  protected $size;
+  protected $rating;
+  protected $default;
 
-  protected $image_size, $rating, $cache_dir;
-  protected $cache_dir_name;
-
-  protected $base_url = "http://www.gravatar.com";
-  // gravatar ratings are only : G | PG | R | X
-  protected $base_ratings = array('G', 'PG', 'R', 'X');
-
-  public function __construct($image_size = null, $rating = null)
+  public function __construct($type = null, $size = null, $rating = null, $default = null,
+                              $is_secure = null, $is_cacheable = null)
   {
+    $this->setType(
+      null !== $type ? $type : sfConfig::get('app_sf_gravatar2_plugin_image_type', 'png')
+    );
+    $this->setSize(
+      null !== $size ? $size : sfConfig::get('app_sf_gravatar2_plugin_image_size', 80)
+    );
+    $this->setRating(
+      null !== $rating ? $rating : sfConfig::get('app_sf_gravatar2_plugin_rating', 'g')
+    );
+    $this->setDefault(
+      null !== $default ? $default : sfConfig::get('app_sf_gravatar2_plugin_default', null)
+    );
+    $this->setIsSecure(
+      null !== $is_secure ? $is_secure : sfConfig::get('app_sf_gravatar2_plugin_secure', false)
+    );
+  }
 
-    if (SYMFONY_VERSION >= 1.1)
+  /**
+   * Returns base URL of gravatar service
+   *
+   * @return string URL
+   */
+  public function getUrlBase()
+  {
+    return $this->isSecure() ? $this->url_secure_base : $this->url_base;
+  }
+
+  /**
+   * Returns generated URL for avatar
+   *
+   * @param string $email E-Mail
+   * @return string generated URL
+   */
+  public function getUrl($email = null)
+  {
+    if (null !== $email)
     {
-      $this->cache_dir = sfConfig::get('sf_upload_dir').DIRECTORY_SEPARATOR
-                         .sfConfig::get('app_gravatar_cache_dir_name', 'g_cache').DIRECTORY_SEPARATOR;
-      $this->cache_dir_name = str_replace(sfConfig::get('sf_web_dir'), '', $this->cache_dir);
+      $this->setEmail($email);
+    }
+
+    $image = sprintf('%s.%s', $this->hash, null !== $this->type ? $this->type : 'png');
+
+    return sprintf('%s%s?s=%d&r=%s%s',
+      $this->getUrlBase(), $image, $this->size, $this->rating,
+      null !== $this->default ? sprintf('&d=%s', $this->default) : ''
+    );
+  }
+
+  /**
+   * Sets the email hash
+   *
+   * @param string $hash E-Mail hash
+   */
+  public function setHash($hash)
+  {
+    $this->hash = $hash;
+  }
+
+  /**
+   * Sets the email hash
+   *
+   * @param string $email E-Mail
+   */
+  public function setEmail($email)
+  {
+    $this->setHash(md5(strtolower($email)));
+  }
+
+  /**
+   * Sets the image type
+   *
+   * @param string $type image type (png|jpg)
+   */
+  public function setType($type)
+  {
+    $this->type = $type;
+  }
+
+  /**
+   * Returns the size of image
+   *
+   * @return integer size of image
+   */
+  public function getSize()
+  {
+    return intval($this->size);
+  }
+
+  /**
+   * Set size of image
+   *
+   * @param integer $size image size
+   */
+  public function setSize($size)
+  {
+    $size = intval($size);
+
+    if (0 < $size && 513 > $size)
+    {
+      $this->size = $size;
     }
     else
     {
-      $this->cache_dir_name = DIRECTORY_SEPARATOR.sfConfig::get('sf_upload_dir_name').DIRECTORY_SEPARATOR
-                              .sfConfig::get('app_gravatar_cache_dir_name', 'g_cache').DIRECTORY_SEPARATOR;
-
-      $this->cache_dir = sfConfig::get('sf_web_dir').$this->cache_dir_name;
+      throw new Exception(sprintf('Size %d unavailable', $size));
     }
+  }
 
-    $this->default_image = sfConfig::get('app_gravatar_default_image', 'gravatar_default.png');
-    $this->expire_ago = sfConfig::get('app_gravatar_cache_expiration', '3 days');
+  /**
+   * Set rating of image
+   *
+   * @param string $rating one of P,G,PG,X
+   */
+  public function setRating($rating)
+  {
+    $rating = strtolower($rating);
 
-    if (is_null($image_size) || $image_size > 80 || $image_size < 1)
-    {
-      $this->image_size = sfConfig::get('app_gravatar_default_size', 80);
-    }
-    else
-    {
-      $this->image_size = $image_size;
-    }
-
-    if (is_null($rating) || !in_array($rating, $this->base_ratings))
-    {
-      $this->rating = sfConfig::get('app_gravatar_default_rating', 'G');
-    }
-    else
+    if (in_array($rating, $this->getAvailableRatings()))
     {
       $this->rating = $rating;
     }
-  }
-
-
-  /**
-   * constructs path to gravatar (with size, rating, md5 email and a default image to redirect to (if not found))
-   *
-   * @return String
-   * @author Mickael Kurmann
-   **/
-  protected function buildGravatarPath($md5_email)
-  {
-    return $this->base_url.'/avatar.php?gravatar_id='.$md5_email.
-                           '&size='.$this->image_size.
-                           '&rating='.$this->rating.
-                           '&default=http://www.default.com';
+    else
+    {
+      throw new Exception(sprintf('Rating "%s" unavailable', $rating));
+    }
   }
 
   /**
-   * Check if a gravatar is avaible on gravatar.com
+   * Sets default URL if no avatar found
    *
-   * @return boolean
-   * @author Mickael Kurmann
-   **/
-  protected function hasGravatar($md5_email)
+   * @param string $default default URL
+   */
+  public function setDefault($default)
   {
-    // TODO try cache !
-    $ch = curl_init($this->buildGravatarPath($md5_email));
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    $default = strtolower($default);
 
-    //--- Start buffering : HIDE CURL EXEC RETURN ...
-    ob_start();
-    curl_exec($ch);
-    ob_end_clean();
-    //--- End buffering and clean output
-
-    $session_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    // 200 == page with no error, else 301 == redirect (no gravatar) or 404... or whatever
-    if ($session_code == 200)
+    if (in_array($default, $this->getAvailableDefaults()))
     {
-      return true;
+      $this->default = $default;
     }
-
-    return false;
+    else
+    {
+      $this->default = urlencode($default);
+    }
   }
 
   /**
-   * check for a cache hit - if found check if file is within expiry time
+   * Is connection to gravatar secure
    *
-   * @return void
-   * @author Mickael Kurmann
-   **/
-  protected function isCacheValid($file_path)
+   * @return bool true if secure, false if not
+   */
+  public function isSecure()
   {
-    if (file_exists($file_path))
-    {
-      if (filectime($file_path) < strtotime("+".$this->expire_ago))
-      {
-        // file exists and cache is valid
-        return true;
-      }
-      else
-      {
-        // file exists but cache has expired
-        unlink($file_path);
-      }
-    }
-
-    // no file
-    return false;
+    return $this->is_secure;
   }
 
-  // get the gravatar to the cache, if email has a gravatar and it does not
-  // already exist (or has expired)
-  public function getGravatar($email)
+  /**
+   * Set security status of connection to gravatar
+   *
+   * @param bool $is_secure yes to set secure, false in other way
+   */
+  public function setIsSecure($is_secure)
   {
-    $md5_email = md5($email);
-    $file = $this->cache_dir.$md5_email.'.png';
-
-    // the cache is valid, return the cached image
-    $to_return = $md5_email;
-
-    // check the cache
-    if (!$this->isCacheValid($file))
-    {
-      // no image in cache
-      if ($this->hasGravatar($md5_email))
-      {
-        $path = $this->buildGravatarPath($md5_email);
-      }
-      else
-      {
-        // no gravatar --> get the default one
-        $path = realpath(dirname(__FILE__).DIRECTORY_SEPARATOR.'..'.DIRECTORY_SEPARATOR.$this->default_image);
-      }
-
-      $new_file = fopen($file, 'w+b');
-      $gravatar_img = file_get_contents($path, 'rb');
-      // image on gravatar.com --> save it in cache
-      fwrite($new_file, $gravatar_img);
-    }
-
-    return str_replace(DIRECTORY_SEPARATOR, '/', $this->cache_dir_name).$to_return;
+    $this->is_secure = (bool)$is_secure;
   }
+
+  /**
+   * Returns list of available ratings
+   *
+   * @return array available ratings
+   */
+  public function getAvailableRatings()
+  {
+    return $this->available_ratings;
+  }
+
+  /**
+   * Returns list of predefined defaults
+   *
+   * @return array predefined defaults
+   */
+  public function getAvailableDefaults()
+  {
+    return $this->available_defaults;
+  }
+
 }

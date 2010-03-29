@@ -1,24 +1,37 @@
 <?php
-/**
- * Displays a gravatar image for a given email
- *
- * @param string  $email            Email of the gravatar
- * @param string  $gravatar_rating  Maximal rating of the gravatar
- * @param integer $gravatar_size    size of the gravatar
- * @param string  $alt_text         Alternative text
- * @return string
- * @see http://site.gravatar.com/site/implement#section_1_1
- */
-function gravatar_image_tag($email, $gravatar_rating = null, $gravatar_size = null, $alt_text = 'Gravatar photo')
-{
-  $gravatar = new GravatarApi($gravatar_rating, $gravatar_size);
-  // return the gravatar image
 
-  return image_tag($gravatar->getGravatar($email),
-                   array('alt' => $alt_text,
-                         'width' => sfConfig::get('app_gravatar_default_size', 80),
-                         'height' => sfConfig::get('app_gravatar_default_size', 80),
-                         'class' => 'gravatar_photo'
-                        )
-                  );
+/**
+ * Returns a gravatar image path for a given email
+ *
+ * @param string $email email
+ * @param string $type type of image (png, jpg)
+ * @param string $size size of image (1..512)
+ * @param string $rating rating of avatar (p, g, pg, x)
+ * @return string image tag
+ */
+function gravatar_image_path($email, $type = null, $size = null, $rating = null)
+{
+  $api = new gravatarApi($type, $size, $rating);
+
+  return $api->getUrl($email);
+}
+
+/**
+ * Returns a image tag with url to gravatar for a given email
+ *
+ * @param string $email email
+ * @param string $type type of image (png, jpg)
+ * @param string $size size of image (1..512)
+ * @param string $rating rating of avatar (p, g, pg, x)
+ * @param string $alt alternative text for image
+ * @return string image tag
+ */
+function gravatar_image_tag($email, $type = null, $size = null, $rating = null, $alt = 'Gravatar')
+{
+  return image_tag(gravatar_image_path($email, $type, $size, $rating), array(
+    'alt'     => $alt,
+    'width'   => null !== $size ? $size : sfConfig::get('app_sf_gravatar2_plugin_image_size', 80),
+    'height'  => null !== $size ? $size : sfConfig::get('app_sf_gravatar2_plugin_image_size', 80),
+    'class'   => 'gravatar'
+  ));
 }
